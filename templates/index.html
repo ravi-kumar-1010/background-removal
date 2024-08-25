@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Processor</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+        }
+
+        #titleBar {
+            background-color: #333;
+            color: white;
+            text-align: center;
+            padding: 20px 0;
+            position: relative;
+        }
+
+        #imageUpload {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            padding: 8px 16px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        #content {
+            display: flex;
+            justify-content: space-between;
+            padding: 20px;
+            flex: 1;
+        }
+
+        #left, #right {
+            width: 45%;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            aspect-ratio: 1 / 1;
+        }
+
+        .image-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            cursor: crosshair;
+        }
+
+        .click-marker {
+            position: absolute;
+            width: 15px;
+            height: 15px;
+            background-color: rgba(255, 255, 255, 0.6);
+            border: 2px solid black;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        #buttonContainer {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        #okButton, #undoButton, #clearButton {
+            margin: 0 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #333;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+
+        #undoButton, #clearButton {
+            background-color: #555;
+        }
+
+        #downloadButton {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+
+        #downloadButton::after {
+            content: "\2193";
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="titleBar">
+    <input type="file" id="imageUpload" accept="image/*">
+</div>
+
+<div id="content">
+    <div id="left">
+        <div class="image-wrapper">
+            <img id="uploadedImage" src="" alt="Uploaded Image">
+        </div>
+    </div>
+
+    <div id="right">
+        <div class="image-wrapper">
+            <img id="processedImage" src="" alt="Processed Image">
+        </div>
+        <a id="downloadButton" href="#" download="processed_image.png" style="display: none;"></a>
+    </div>
+</div>
+
+<div id="buttonContainer">
+    <button id="undoButton">Undo</button>
+    <button id="clearButton">Clear All</button>
+    <button id="okButton">OK</button>
+</div>
+
+<script>
+    let imageUpload = document.getElementById('imageUpload');
+    let uploadedImage = document.getElementById('uploadedImage');
+    let processedImage = document.getElementById('processedImage');
+    let okButton = document.getElementById('okButton');
+    let undoButton = document.getElementById('undoButton');
+    let clearButton = document.getElementById('clearButton');
+    let downloadButton = document.getElementById('downloadButton');
+    let points = [];
+    let markers = [];
+
+    // Handle image upload
+    imageUpload.addEventListener('change', function(event) {
+        let file = event.target.files[0];
+        let formData = new FormData();
+        formData.append('image', file);
+
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            uploadedImage.src = data.image_path;
+            processedImage.src = ''; // Clear processed image on new upload
+            points = []; // Clear points on new upload
+            clearMarkers(); // Clear click markers on new upload
+            downloadButton.style.display = 'none';
+        });
+    });
+
+    // Handle image click
+    uploadedImage.addEventListener('click', function(event) {
+            let rect = uploadedImage.getBoundingClientRect();
+            let x = event.clientX - rect.left;
+            let y = event.clientY - rect.top;
+            console.log('Image bounding rect:', rect);
+            console.log(event.clientX,event.clientY)
+
+            console.log("x,y",x,y)
+            // Calculate actual image coordinates
+            let originalWidth = uploadedImage.naturalWidth;
+            let originalHeight = uploadedImage.naturalHeight;
+            let displayWidth = uploadedImage.width;
+            let displayHeight = uploadedImage.height;
+
+            let scaleX = originalWidth / displayWidth;
+            let scaleY = originalHeight / displayHeight;
+            console.log("Scale x,y",scaleX,scaleY)
+            let realX = Math.round(x * scaleX);
+            let realY = Math.round(y * scaleY);
+            console.log("Real",realX,realY)
+            points.push([realX, realY]);
+
+            // Add marker on clicked position
+            let marker = document.createElement('div');
+            marker.className = 'click-marker';
+            marker.style.left = `${x}px`; // Center the marker
+            marker.style.top = `${y}px`; // Center the marker
+            console.log("Marker",marker.style.left,marker.style.top)
+            uploadedImage.parentElement.appendChild(marker);
+            markers.push(marker);
+
+            // Send points to the server for processing
+            sendPointsToServer();
+        });
+    // Handle OK button click
+    okButton.addEventListener('click', function() {
+        imageUpload.disabled = true;
+        uploadedImage.style.pointerEvents = 'none';
+        okButton.disabled = true;
+        undoButton.disabled = true;
+        clearButton.disabled = true;
+        
+        // Request final centered image
+        fetch('/finalize', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                points: points
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            processedImage.src = data.final_image_path + '?t=' + new Date().getTime(); // Force reload image
+            downloadButton.href = data.final_image_path;
+            downloadButton.style.display = 'block';
+        });
+    });
+
+    // Handle Undo button click
+    undoButton.addEventListener('click', function() {
+        if (points.length > 0) {
+            points.pop();
+            let lastMarker = markers.pop();
+            if (lastMarker) {
+                lastMarker.remove();
+            }
+            if (points.length === 0) {
+                processedImage.src = '';
+                downloadButton.style.display = 'none';
+            } else {
+                sendPointsToServer();
+            }
+        }
+    });
+
+    // Handle Clear All button click
+    clearButton.addEventListener('click', function() {
+        points = [];
+        clearMarkers();
+        processedImage.src = '';
+        downloadButton.style.display = 'none';
+    });
+
+    // Function to clear click markers
+    function clearMarkers() {
+        markers.forEach(marker => marker.remove());
+        markers = [];
+    }
+
+    // Function to send points to server
+    function sendPointsToServer() {
+        fetch('/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                points: points
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            processedImage.src = data.processed_image_path + '?t=' + new Date().getTime(); // Force reload image
+            downloadButton.href = data.processed_image_path;
+            downloadButton.style.display = 'block';
+        });
+    }
+</script>
+
+</body>
+</html>
